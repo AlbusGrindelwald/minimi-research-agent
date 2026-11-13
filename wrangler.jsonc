@@ -14,7 +14,7 @@
     {
       "binding": "DB",
       "database_name": "minimi-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "e0e95ef5-53fb-4e42-aee0-3428be40e07b",
       "migrations_dir": "migrations"
     }
   ],
