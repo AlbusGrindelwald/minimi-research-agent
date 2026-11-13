@@ -74,6 +74,35 @@ describe("bounded web search", () => {
     )).rejects.toMatchObject<Partial<ProviderError>>({ code: "gemini_quota", retryable: true });
   });
 
+  it("reports sanitized Gemini request status without exposing the provider body", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: { status: "INVALID_ARGUMENT", message: "private provider details" },
+    }), { status: 400, headers: { "content-type": "application/json" } })));
+    await expect(gemini.chooseAction(
+      { ...env, GEMINI_API_KEY: "test-key" },
+      [{ role: "user", parts: [{ text: "Compare database plans" }] }],
+      "System instructions",
+      false,
+    )).rejects.toMatchObject<Partial<ProviderError>>({
+      code: "gemini_request_error_400_invalid_argument",
+      message: "Gemini rejected the request (HTTP 400, INVALID_ARGUMENT). Check the model and request configuration.",
+      retryable: false,
+    });
+  });
+
+  it("classifies Gemini server errors as retryable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 503 })));
+    await expect(gemini.chooseAction(
+      { ...env, GEMINI_API_KEY: "test-key" },
+      [{ role: "user", parts: [{ text: "Compare database plans" }] }],
+      "System instructions",
+      false,
+    )).rejects.toMatchObject<Partial<ProviderError>>({
+      code: "gemini_server_error_503",
+      retryable: true,
+    });
+  });
+
   it("reserves two credits per advanced query and stops before Tavily at the global limit", async () => {
     const limitedDb = fakeDatabase(0);
     const limitedEnv = { TAVILY_API_KEY: "test-key", DB: limitedDb.db } as AppEnv;

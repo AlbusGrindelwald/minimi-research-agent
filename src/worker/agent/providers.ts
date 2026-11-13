@@ -43,11 +43,32 @@ async function reserveTavilyCredits(db: D1Database, queryCount: number, depth: "
   return (result.meta.changes ?? 0) > 0;
 }
 
-function responseError(provider: string, status: number): ProviderError {
+async function responseError(provider: string, response: Response): Promise<ProviderError> {
   const slug = provider.toLowerCase();
+  const status = response.status;
+  let providerStatus: string | null = null;
+  try {
+    const payload = await response.clone().json() as { error?: { status?: unknown } };
+    const candidate = payload.error?.status;
+    if (typeof candidate === "string" && /^[A-Z][A-Z0-9_]{0,39}$/.test(candidate)) providerStatus = candidate;
+  } catch {
+    // Keep diagnostics useful without exposing raw provider response bodies.
+  }
   if (status === 429) return new ProviderError(`${slug}_quota`, `${provider} free quota is temporarily unavailable.`);
   if (status === 401 || status === 403) return new ProviderError(`${slug}_configuration`, `${provider} rejected the configured API key.`, false);
-  return new ProviderError(`${slug}_unavailable`, `${provider} could not complete the request.`);
+  if (status === 400 || status === 404) {
+    const suffix = providerStatus ? `, ${providerStatus}` : "";
+    const codeSuffix = providerStatus ? `_${providerStatus.toLowerCase()}` : "";
+    return new ProviderError(
+      `${slug}_request_error_${status}${codeSuffix}`,
+      `${provider} rejected the request (HTTP ${status}${suffix}). Check the model and request configuration.`,
+      false,
+    );
+  }
+  if (status >= 500) {
+    return new ProviderError(`${slug}_server_error_${status}`, `${provider} is temporarily unavailable (HTTP ${status}).`);
+  }
+  return new ProviderError(`${slug}_unavailable_${status}`, `${provider} could not complete the request (HTTP ${status}).`);
 }
 
 export async function runWebSearch(env: AppEnv, args: unknown): Promise<SearchBatch> {
@@ -76,7 +97,7 @@ export async function runWebSearch(env: AppEnv, args: unknown): Promise<SearchBa
         include_raw_content: false,
       }),
     });
-    if (!response.ok) throw responseError("Tavily", response.status);
+    if (!response.ok) throw await responseError("Tavily", response);
     const payload = await response.json() as { results?: unknown };
     return { query, results: Array.isArray(payload.results) ? payload.results : [] };
   }));
@@ -217,7 +238,7 @@ async function generate(env: AppEnv, input: {
     signal: AbortSignal.timeout(25_000),
     body: JSON.stringify({ ...config, contents: input.contents }),
   });
-  if (!response.ok) throw responseError("Gemini", response.status);
+  if (!response.ok) throw await responseError("Gemini", response);
   const payload = await response.json() as {
     candidates?: Array<{ content?: { role?: string; parts?: GeminiPart[] } }>;
   };

@@ -274,7 +274,7 @@ export async function postChat(c: AppContext) {
       await stream.writeSSE({ event: "result", data: JSON.stringify(result) });
     } catch (error) {
       const provider = error instanceof ProviderError ? error : null;
-      const code = provider?.code ?? "request_failed";
+      const code = provider?.code ?? `request_failed_${previousPhase || "unknown"}`;
       const message = provider?.message ?? "I couldn't finish that response. Your message is saved; try again.";
       await env.DB.prepare(
         `UPDATE messages SET status = 'failed', error_code = ?, processing_until = NULL WHERE id = ? AND user_id = ?`,
